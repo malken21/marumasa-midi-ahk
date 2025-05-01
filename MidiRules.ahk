@@ -31,6 +31,12 @@ ProcessNote(device, channel, note, velocity, isNoteOn) {
             ; SteamVR を起動
             Run("steam://rungameid/250820")
         }
+        case 84: ; 国際式 C6
+        {
+            ; https://github.com/malken21/Discord-VoiceMute-Switch
+            ; Discord のボイスチャットのミュートを切り替え
+            Run("curl http://localhost:55685/", , "Hide")
+        }
     }
 }
 
