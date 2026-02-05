@@ -31,6 +31,11 @@ ProcessNote(device, channel, note, velocity, isNoteOn) {
             ; SteamVR を起動
             Run("steam://rungameid/250820")
         }
+        case 81: ; 国際式 A5
+        {
+            ; マウスカーソルが触れているウィンドウのボーダーレス切り替え
+            ToggleBorderlessUnderMouse()
+        }
         case 83: ; 国際式 B5
         {
             ; マウスカーソルが触れているウィンドウを 1280x720 にリサイズ
