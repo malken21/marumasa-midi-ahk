@@ -2,7 +2,7 @@
 
 global appConfig
 
-configFileName := "MidiToMacro.ini"
+configFileName := A_ScriptDir . "\MidiToMacro.ini"
 
 Class MidiToMacroConfig {
 	__New() {

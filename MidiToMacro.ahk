@@ -9,18 +9,29 @@ Persistent()
 MaybeOpenMidiInput() {
 	global appConfig, currentMidiInputDeviceIndex
 
-	if (
-		appConfig.midiInDevice >= 0
-		; Open the MIDI input, if we don't have a "device name" stored, or if
-		; the stored device name matches the actual device name
-		and (
-			StrLen(appConfig.midiInDeviceName) == 0
-			or GetMidiDeviceName(appConfig.midiInDevice) == appConfig.midiInDeviceName
-		)
-	) {
-		OpenMidiInput(appConfig.midiInDevice, OnMidiData)
-		return true
+	; Try to open the device at the stored index if it matches the name
+	if (appConfig.midiInDevice >= 0) {
+		deviceName := GetMidiDeviceName(appConfig.midiInDevice)
+		if (StrLen(appConfig.midiInDeviceName) == 0 || deviceName == appConfig.midiInDeviceName) {
+			OpenMidiInput(appConfig.midiInDevice, OnMidiData)
+			return true
+		}
 	}
+
+	; Fallback: If we have a stored name, search for it among all devices
+	if (StrLen(appConfig.midiInDeviceName) > 0) {
+		numPorts := DllCall("winmm.dll\midiInGetNumDevs")
+		Loop numPorts {
+			index := A_Index - 1
+			if (GetMidiDeviceName(index) == appConfig.midiInDeviceName) {
+				OpenMidiInput(index, OnMidiData)
+				; Update config with the new index
+				WriteConfigMidiDevice(index, appConfig.midiInDeviceName)
+				return true
+			}
+		}
+	}
+
 	return false
 }
 
