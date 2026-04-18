@@ -43,9 +43,15 @@ ProcessNote(device, channel, note, velocity, isNoteOn) {
         }
         case 84: ; 国際式 C6
         {
-            ; https://github.com/malken21/Discord-VoiceMute-Switch
+            global rpc
             ; Discord のボイスチャットのミュートを切り替え
-            Run("curl http://localhost:55685/", , "Hide")
+            if (!IsSet(rpc) || !rpc.hPipe) {
+                DisplayOutput("Discord", "RPC not connected")
+            } else if (!rpc.HasProp("isAuthenticated") || !rpc.isAuthenticated) {
+                DisplayOutput("Discord", "RPC not authenticated")
+            } else {
+                rpc.ToggleMute()
+            }
         }
     }
 }
