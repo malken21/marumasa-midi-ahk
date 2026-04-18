@@ -46,6 +46,12 @@ InitDiscord() {
         return
     }
 
+    ; 既存のRPCオブジェクトが存在する場合はプロセスを終了・破棄して初期化する
+    if (IsSet(rpc) && rpc) {
+        try rpc.Close()
+        rpc := ""
+    }
+
     rpc := DiscordRPC(appConfig.discordClientId)
 
     ; イベントハンドラの設定
@@ -54,7 +60,12 @@ InitDiscord() {
         AppendMidiOutputRow("Discord", "Ready: " . data.user.username)
     ))
     rpc.On("ERROR", (data) => AppendMidiOutputRow("Discord", "Error: " . (data.HasProp("message") ? data.message : JSON.Stringify(data))))
-    rpc.On("DISCONNECTED", (msg) => (rpc.isAuthenticated := false, AppendMidiOutputRow("Discord", "Disconnected: " . msg)))
+    
+    ; 切断時：インスタンス破棄を含む完全な再初期化ルートへ移行
+    rpc.On("DISCONNECTED", (msg) => (
+        AppendMidiOutputRow("Discord", "Disconnected: " . msg),
+        ScheduleDiscordReconnect()
+    ))
 
     ; AUTHENTICATE 成功ハンドラ
     rpc.On("AUTHENTICATE", (data) => (
@@ -69,7 +80,7 @@ InitDiscord() {
         AppendMidiOutputRow("Discord", "Mute: " . (data.HasProp("mute") ? (data.mute ? "ON" : "OFF") : "?"))
     ))
 
-    ; AUTHORIZE 成功ハンドラ（Example.ahk 準拠、イベント名は AUTHORIZE が正しい）
+    ; AUTHORIZE 成功ハンドラ
     rpc.On("AUTHORIZE", (data) => (
         AppendMidiOutputRow("Discord", "Authorized, getting token..."),
         _AuthorizeCallback(data)
@@ -78,6 +89,7 @@ InitDiscord() {
     _AuthorizeCallback(data) {
         if (!data.HasProp("code")) {
             AppendMidiOutputRow("Discord", "Authorize: no code in response")
+            ScheduleDiscordReconnect()
             return
         }
         res := rpc.ExchangeCodeForToken(data.code, appConfig.discordClientSecret)
@@ -88,21 +100,24 @@ InitDiscord() {
             AppendMidiOutputRow("Discord", "Token saved and authenticating...")
         } else {
             AppendMidiOutputRow("Discord", "Token exchange failed: " . (res.HasProp("error") ? res.error : "Unknown error"))
+            ScheduleDiscordReconnect()
         }
     }
 
     if (!rpc.Connect()) {
-        AppendMidiOutputRow("Discord", "Failed to connect to PIPE")
+        AppendMidiOutputRow("Discord", "Failed to connect to PIPE. Retrying in 10s...")
+        ScheduleDiscordReconnect()
         return
     }
-    AppendMidiOutputRow("Discord", "Connected to PIPE. Waiting for READY...")
 
-    ; Example.ahk 準拠: Connect 後 500ms 遅延でトークン認証（READY より先に試みる）
-    SetTimer(() => _TryAuthenticate(), -500)
+    AppendMidiOutputRow("Discord", "Connected to PIPE. Waiting for READY...")
+    SetTimer(_TryAuthenticate, -500)
 
     _TryAuthenticate() {
-        if (!rpc || !rpc.hPipe)
+        if (!IsSet(rpc) || !rpc || !rpc.HasProp("hPipe") || !rpc.hPipe) {
+            ScheduleDiscordReconnect()
             return
+        }
         if (appConfig.discordAccessToken) {
             AppendMidiOutputRow("Discord", "Auto-authenticating with saved token...")
             rpc.Authenticate(appConfig.discordAccessToken)
@@ -113,15 +128,21 @@ InitDiscord() {
     }
 }
 
+; 10秒後にInitDiscord自体を再実行する独立関数
+ScheduleDiscordReconnect() {
+    SetTimer(InitDiscord, -10000)
+}
+
 ResetDiscordToken(*) {
     global rpc, appConfig
-    WriteConfigDiscordToken("")
-    appConfig.discordAccessToken := ""
-    if (IsSet(rpc)) {
-        rpc.Close()
-    }
-    AppendMidiOutputRow("Discord", "Token reset. Re-authorizing...")
-    InitDiscord()
+	global rpc, appConfig
+	WriteConfigDiscordToken("")
+	appConfig.discordAccessToken := ""
+	if (IsSet(rpc)) {
+		rpc.Close()
+	}
+	AppendMidiOutputRow("Discord", "Token reset. Re-authorizing...")
+	InitDiscord()
 }
 
 Main() {
