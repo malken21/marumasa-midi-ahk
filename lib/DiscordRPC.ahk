@@ -15,6 +15,7 @@ class DiscordRPC {
     callbacks := Map()
     pendingRequests := Map()
     buffer := Buffer(0)
+    isAuthenticated := false
 
     __New(clientId) {
         this.clientId := clientId
@@ -214,6 +215,9 @@ class DiscordRPC {
             DllCall("CloseHandle", "Ptr", this.hPipe)
             this.hPipe := 0
         }
+        this.isAuthenticated := false
+        this.buffer := Buffer(0)
+        this.pendingRequests := Map()
     }
 
     _OnTick() {
