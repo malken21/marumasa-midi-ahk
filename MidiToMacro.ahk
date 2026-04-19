@@ -46,49 +46,63 @@ InitDiscord() {
         return
     }
 
-    ; 既存のRPCオブジェクトが存在する場合はプロセスを終了・破棄して初期化する
+    ; Stop any existing reconnection timer
+    SetTimer(InitDiscord, 0)
+
+    ; 既存のRPCオブジェクトが存在する場合はクリーンアップ
     if (IsSet(rpc) && rpc) {
         try rpc.Close()
         rpc := ""
     }
 
-    rpc := DiscordRPC(appConfig.discordClientId)
-
-    ; イベントハンドラの設定
-    rpc.On("READY", (data) => (
-        rpc.user := data.user,
+    ; イベントハンドラ（ネストされた関数として定義）
+    _OnReady(data) {
+        SetTimer(_OnConnectTimeout, 0) ; タイムアウトタイマーを停止
+        rpc.user := data.user
         AppendMidiOutputRow("Discord", "Ready: " . data.user.username)
-    ))
-    rpc.On("ERROR", (data) => AppendMidiOutputRow("Discord", "Error: " . (data.HasProp("message") ? data.message : JSON.Stringify(data))))
-    
-    ; 切断時：インスタンス破棄を含む完全な再初期化ルートへ移行
-    rpc.On("DISCONNECTED", (msg) => (
-        AppendMidiOutputRow("Discord", "Disconnected: " . msg),
+        _AuthenticateOrAuthorize()
+    }
+
+    _OnError(data) {
+        AppendMidiOutputRow("Discord", "Error: " . (data.HasProp("message") ? data.message : JSON.Stringify(data)))
+        ; code 4009 (Invalid Token) の場合はトークンをリセットして再試行
+        if (data.HasProp("code") && data.code == 4009) {
+            AppendMidiOutputRow("Discord", "Invalid token. Resetting...")
+            SetTimer(ResetDiscordToken, -1)
+        }
+    }
+
+    _OnDisconnected(msg) {
+        AppendMidiOutputRow("Discord", "Disconnected: " . msg)
         ScheduleDiscordReconnect()
-    ))
+    }
 
-    ; AUTHENTICATE 成功ハンドラ
-    rpc.On("AUTHENTICATE", (data) => (
-        rpc.isAuthenticated := true,
-        rpc.user := data.user,
-        WriteConfigDiscordToken(appConfig.discordAccessToken),
+    _OnAuthenticate(data) {
+        rpc.isAuthenticated := true
+        rpc.user := data.user
         AppendMidiOutputRow("Discord", "Authenticated: " . data.user.username)
-    ))
+    }
 
-    ; SET_VOICE_SETTINGS レスポンスハンドラ（デバッグ用）
-    rpc.On("SET_VOICE_SETTINGS", (data) => (
-        AppendMidiOutputRow("Discord", "Mute: " . (data.HasProp("mute") ? (data.mute ? "ON" : "OFF") : "?"))
-    ))
+    _OnAuthorize(data) {
+        AppendMidiOutputRow("Discord", "Authorized, exchanging code for token...")
+        _HandleAuthorizeResponse(data)
+    }
 
-    ; AUTHORIZE 成功ハンドラ
-    rpc.On("AUTHORIZE", (data) => (
-        AppendMidiOutputRow("Discord", "Authorized, getting token..."),
-        _AuthorizeCallback(data)
-    ))
+    ; 内部ヘルパー: 認証または認可の開始
+    _AuthenticateOrAuthorize() {
+        if (appConfig.discordAccessToken) {
+            AppendMidiOutputRow("Discord", "Authenticating with saved token...")
+            rpc.Authenticate(appConfig.discordAccessToken)
+        } else {
+            AppendMidiOutputRow("Discord", "No token. Requesting authorization...")
+            rpc.Authorize(["rpc", "rpc.voice.read", "rpc.voice.write"])
+        }
+    }
 
-    _AuthorizeCallback(data) {
+    ; 内部ヘルパー: 認可レスポンスの処理
+    _HandleAuthorizeResponse(data) {
         if (!data.HasProp("code")) {
-            AppendMidiOutputRow("Discord", "Authorize: no code in response")
+            AppendMidiOutputRow("Discord", "Authorize failed: no code")
             ScheduleDiscordReconnect()
             return
         }
@@ -97,39 +111,44 @@ InitDiscord() {
             appConfig.discordAccessToken := res.access_token
             WriteConfigDiscordToken(res.access_token)
             rpc.Authenticate(res.access_token)
-            AppendMidiOutputRow("Discord", "Token saved and authenticating...")
+            AppendMidiOutputRow("Discord", "Token saved.")
         } else {
             AppendMidiOutputRow("Discord", "Token exchange failed: " . (res.HasProp("error") ? res.error : "Unknown error"))
             ScheduleDiscordReconnect()
         }
     }
 
+    ; 内部ヘルパー: 接続タイムアウト処理 (Watchdog)
+    _OnConnectTimeout() {
+        if (!rpc.isAuthenticated) {
+            AppendMidiOutputRow("Discord", "Connection timeout (READY not received). Retrying...")
+            ScheduleDiscordReconnect()
+        }
+    }
+
+    rpc := DiscordRPC(appConfig.discordClientId)
+
+    ; イベントハンドラの設定
+    rpc.On("READY", _OnReady)
+    rpc.On("ERROR", _OnError)
+    rpc.On("DISCONNECTED", _OnDisconnected)
+    rpc.On("AUTHENTICATE", _OnAuthenticate)
+    rpc.On("AUTHORIZE", _OnAuthorize)
+
+    ; 接続開始
     if (!rpc.Connect()) {
-        AppendMidiOutputRow("Discord", "Failed to connect to PIPE. Retrying in 10s...")
+        AppendMidiOutputRow("Discord", "Pipe connection failed. Retrying in 10s...")
         ScheduleDiscordReconnect()
         return
     }
 
-    AppendMidiOutputRow("Discord", "Connected to PIPE. Waiting for READY...")
-    SetTimer(_TryAuthenticate, -500)
-
-    _TryAuthenticate() {
-        if (!IsSet(rpc) || !rpc || !rpc.HasProp("hPipe") || !rpc.hPipe) {
-            ScheduleDiscordReconnect()
-            return
-        }
-        if (appConfig.discordAccessToken) {
-            AppendMidiOutputRow("Discord", "Auto-authenticating with saved token...")
-            rpc.Authenticate(appConfig.discordAccessToken)
-        } else {
-            AppendMidiOutputRow("Discord", "No token. Requesting authorization...")
-            rpc.Authorize(["rpc", "rpc.voice.read", "rpc.voice.write"])
-        }
-    }
+    AppendMidiOutputRow("Discord", "Pipe connected. Waiting for READY...")
+    SetTimer(_OnConnectTimeout, -5000) ; 5秒待っても READY が来なければ再試行
 }
 
-; 10秒後にInitDiscord自体を再実行する独立関数
+; 再試行をスケジュールする (既存のタイマーを上書き)
 ScheduleDiscordReconnect() {
+    AppendMidiOutputRow("Discord", "Reconnection scheduled in 10s...")
     SetTimer(InitDiscord, -10000)
 }
 
