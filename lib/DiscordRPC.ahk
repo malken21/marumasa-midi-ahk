@@ -153,6 +153,33 @@ class DiscordRPC {
         }
     }
 
+    /**
+     * OAuth2 リフレッシュトークンを使用してアクセストークンを更新する
+     * @param {String} refresh_token リフレッシュトークン
+     * @param {String} client_secret クライアントシークレット
+     * @returns {Object} JSON レスポンス (access_token, refresh_token 等を含む)
+     */
+    RefreshToken(refresh_token, client_secret) {
+        try {
+            whr := ComObject("WinHttp.WinHttpRequest.5.1")
+            whr.Open("POST", "https://discord.com/api/oauth2/token", false)
+            whr.SetRequestHeader("Content-Type", "application/x-www-form-urlencoded")
+            
+            body := "client_id=" . this.clientId 
+                  . "&client_secret=" . client_secret 
+                  . "&grant_type=refresh_token"
+                  . "&refresh_token=" . refresh_token
+            
+            whr.Send(body)
+            if (whr.Status != 200)
+                throw Error("Token refresh failed: " . whr.ResponseText)
+            
+            return JSON.Parse(whr.ResponseText)
+        } catch as e {
+            return {error: e.Message}
+        }
+    }
+
     ; --- Guild & Channel Information ---
 
     GetGuild(guildId, timeout := 0) => this.Request("GET_GUILD", {guild_id: guildId, timeout: timeout})

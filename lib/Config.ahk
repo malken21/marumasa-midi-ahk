@@ -13,6 +13,7 @@ Class MidiToMacroConfig {
 		this.discordClientId := "YOUR_CLIENT_ID"
 		this.discordClientSecret := "YOUR_CLIENT_SECRET"
 		this.discordAccessToken := ""
+		this.discordRefreshToken := ""
 	}
 }
 
@@ -27,12 +28,15 @@ ReadConfig() {
 		appConfig.discordClientId := IniRead(configFileName, "Settings", "DiscordClientId", "YOUR_CLIENT_ID")
 		appConfig.discordClientSecret := IniRead(configFileName, "Settings", "DiscordClientSecret", "YOUR_CLIENT_SECRET")
 		appConfig.discordAccessToken := IniRead(configFileName, "Settings", "DiscordAccessToken", "")
+		appConfig.discordRefreshToken := IniRead(configFileName, "Settings", "DiscordRefreshToken", "")
 	}
 }
 
-WriteConfigDiscordToken(accessToken) {
+WriteConfigDiscordTokens(accessToken, refreshToken) {
 	IniWrite(accessToken, configFileName, "Settings", "DiscordAccessToken")
+	IniWrite(refreshToken, configFileName, "Settings", "DiscordRefreshToken")
 	appConfig.discordAccessToken := accessToken
+	appConfig.discordRefreshToken := refreshToken
 }
 
 WriteConfigMidiDevice(midiInDevice, midiInDeviceName) {

@@ -65,10 +65,15 @@ InitDiscord() {
 
     _OnError(data) {
         AppendMidiOutputRow("Discord", "Error: " . (data.HasProp("message") ? data.message : JSON.Stringify(data)))
-        ; code 4009 (Invalid Token) の場合はトークンをリセットして再試行
+        ; code 4009 (Invalid Token) の場合はリフレッシュまたはリセットして再試行
         if (data.HasProp("code") && data.code == 4009) {
-            AppendMidiOutputRow("Discord", "Invalid token. Resetting...")
-            SetTimer(ResetDiscordToken, -1)
+            if (appConfig.discordRefreshToken) {
+                AppendMidiOutputRow("Discord", "Invalid token. Attempting token refresh...")
+                SetTimer(_TryRefreshToken, -1)
+            } else {
+                AppendMidiOutputRow("Discord", "Invalid token and no refresh token. Resetting...")
+                SetTimer(ResetDiscordToken, -1)
+            }
         }
     }
 
@@ -93,6 +98,9 @@ InitDiscord() {
         if (appConfig.discordAccessToken) {
             AppendMidiOutputRow("Discord", "Authenticating with saved token...")
             rpc.Authenticate(appConfig.discordAccessToken)
+        } else if (appConfig.discordRefreshToken) {
+            AppendMidiOutputRow("Discord", "No access token. Attempting token refresh...")
+            _TryRefreshToken()
         } else {
             AppendMidiOutputRow("Discord", "No token. Requesting authorization...")
             rpc.Authorize(["rpc", "rpc.voice.read", "rpc.voice.write"])
@@ -108,13 +116,33 @@ InitDiscord() {
         }
         res := rpc.ExchangeCodeForToken(data.code, appConfig.discordClientSecret)
         if (res.HasProp("access_token")) {
-            appConfig.discordAccessToken := res.access_token
-            WriteConfigDiscordToken(res.access_token)
+            refreshToken := res.HasProp("refresh_token") ? res.refresh_token : ""
+            WriteConfigDiscordTokens(res.access_token, refreshToken)
             rpc.Authenticate(res.access_token)
             AppendMidiOutputRow("Discord", "Token saved.")
         } else {
             AppendMidiOutputRow("Discord", "Token exchange failed: " . (res.HasProp("error") ? res.error : "Unknown error"))
             ScheduleDiscordReconnect()
+        }
+    }
+
+    ; 内部ヘルパー: リフレッシュトークンを使用してアクセストークンを更新
+    _TryRefreshToken() {
+        if (!appConfig.discordRefreshToken) {
+            ResetDiscordToken()
+            return
+        }
+        AppendMidiOutputRow("Discord", "Refreshing access token...")
+        res := rpc.RefreshToken(appConfig.discordRefreshToken, appConfig.discordClientSecret)
+        if (res.HasProp("access_token")) {
+            refreshToken := res.HasProp("refresh_token") ? res.refresh_token : appConfig.discordRefreshToken
+            WriteConfigDiscordTokens(res.access_token, refreshToken)
+            rpc.Authenticate(res.access_token)
+            AppendMidiOutputRow("Discord", "Token refreshed and saved.")
+        } else {
+            AppendMidiOutputRow("Discord", "Token refresh failed: " . (res.HasProp("error") ? res.error : "Unknown error"))
+            AppendMidiOutputRow("Discord", "Resetting tokens and re-authorizing...")
+            ResetDiscordToken()
         }
     }
 
@@ -153,14 +181,12 @@ ScheduleDiscordReconnect() {
 }
 
 ResetDiscordToken(*) {
-    global rpc, appConfig
 	global rpc, appConfig
-	WriteConfigDiscordToken("")
-	appConfig.discordAccessToken := ""
+	WriteConfigDiscordTokens("", "")
 	if (IsSet(rpc)) {
 		rpc.Close()
 	}
-	AppendMidiOutputRow("Discord", "Token reset. Re-authorizing...")
+	AppendMidiOutputRow("Discord", "Tokens reset. Re-authorizing...")
 	InitDiscord()
 }
 
